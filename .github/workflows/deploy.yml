@@ -1,0 +1,99 @@
+# A staging copy of the wvurail.github.io "wvu" branch, served at
+#   https://wvurail.org/rail-preview/
+# The custom domain is inherited from the organisation site, so this project
+# repo publishes under a subpath of it automatically. Nothing here is the real
+# site: it exists so the Design System build can be reviewed (Conceptboard,
+# the SCM review) before it replaces main.
+#
+# Every page is built with noindex, and the lab repo's CNAME file is removed
+# from the output before upload — a CNAME in a deployed project site would
+# tell GitHub to claim that domain for THIS repo and collide with the
+# organisation site.
+#
+# Teardown, at cutover: delete this repo, or switch Pages off. The branch it
+# reads will have been merged and no longer needs a preview.
+
+name: Stage the wvu branch
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # picks up pushes to the lab repo within half an hour
+  workflow_dispatch:         # or immediately, by hand (Actions → Run workflow)
+  push:
+    branches: [main]         # edits to this workflow itself
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: WVURAIL/wvurail.github.io
+          ref: wvu
+
+      # Same gems GitHub Pages runs (Jekyll 3.9 via the github-pages metagem),
+      # exactly as the lab repo's own build workflow pins them.
+      - name: Pin the exact gems GitHub Pages uses
+        run: |
+          cat > Gemfile.ci <<'GEMFILE'
+          source "https://rubygems.org"
+          gem "github-pages", group: :jekyll_plugins
+          gem "webrick", "~> 1.8"
+          GEMFILE
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.1"
+          bundler-cache: true
+        env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/Gemfile.ci
+
+      # Two overrides and nothing else: the subpath, and noindex on every page
+      # (the layout honours site.noindex_all). url stays https://wvurail.org so
+      # canonical / og:url / sitemap are at least truthful about the host.
+      - name: Staging overrides
+        run: |
+          cat > _config_staging.yml <<'CFG'
+          baseurl: /rail-preview
+          noindex_all: true
+          CFG
+
+      - name: Build
+        run: bundle exec jekyll build --trace --config _config.yml,_config_staging.yml
+        env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/Gemfile.ci
+          JEKYLL_ENV: production
+
+      - name: Never publish the lab's CNAME from here
+        run: |
+          rm -f _site/CNAME
+          test ! -e _site/CNAME
+          grep -q 'name="robots" content="noindex"' _site/index.html
+
+      - name: Enable Pages (first run only; harmless afterwards)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
