@@ -6,7 +6,7 @@
 # the SCM review) before it replaces main.
 #
 # Every page is built with noindex, and the lab repo's CNAME file is removed
-# from the output before upload — a CNAME in a deployed project site would
+# from the output before upload â a CNAME in a deployed project site would
 # tell GitHub to claim that domain for THIS repo and collide with the
 # organisation site.
 #
@@ -18,7 +18,7 @@ name: Stage the wvu branch
 on:
   schedule:
     - cron: "*/30 * * * *"   # picks up pushes to the lab repo within half an hour
-  workflow_dispatch:         # or immediately, by hand (Actions → Run workflow)
+  workflow_dispatch:         # or immediately, by hand (Actions â Run workflow)
   push:
     branches: [main]         # edits to this workflow itself
 
@@ -79,11 +79,8 @@ jobs:
           test ! -e _site/CNAME
           grep -q 'name="robots" content="noindex"' _site/index.html
 
-      - name: Enable Pages (first run only; harmless afterwards)
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
+      # Pages itself is switched on once, by hand: Settings → Pages → Source:
+      # "GitHub Actions". The workflow token is not allowed to do that.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
