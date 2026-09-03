@@ -13,7 +13,7 @@
 # tell GitHub to claim that domain for THIS repo and collide with the
 # organisation site.
 #
-# Pages itself is switched on once, by hand: Settings → Pages → Source:
+# Pages itself is switched on once, by hand: Settings -> Pages -> Source:
 # "GitHub Actions". The workflow token is not allowed to do that.
 #
 # Teardown, at cutover: delete this repo, or switch Pages off.
@@ -23,7 +23,7 @@ name: Stage the wvu branches
 on:
   schedule:
     - cron: "*/30 * * * *"   # picks up pushes to either repo within half an hour
-  workflow_dispatch:         # or immediately, by hand (Actions → Run workflow)
+  workflow_dispatch:         # or immediately, by hand (Actions -> Run workflow)
   push:
     branches: [main]         # edits to this workflow itself
 
@@ -54,9 +54,9 @@ jobs:
           ref: wvu
           path: lessons
 
-      # Same gems GitHub Pages runs (Jekyll 3.9 via the github-pages metagem),
-      # exactly as the lab repo's own build workflow pins them. One bundle
-      # serves both builds.
+      # The same gems GitHub Pages runs (Jekyll 3.9 via the github-pages
+      # metagem), pinned exactly as the lab repo's own build workflow pins
+      # them. One bundle serves both builds.
       - name: Pin the exact gems GitHub Pages uses
         run: |
           cat > Gemfile.ci <<'GEMFILE'
@@ -72,14 +72,22 @@ jobs:
         env:
           BUNDLE_GEMFILE: ${{ github.workspace }}/Gemfile.ci
 
-      # Two overrides per site and nothing else: the subpath, and noindex on
-      # every page (both layouts honour site.noindex_all). url stays
+      # Overrides only: the subpath each site lives at, noindex on every page
+      # (both layouts honour site.noindex_all), and — for the lessons site —
+      # where the lab site is, since it links back to it. url stays
       # https://wvurail.org so canonical / og:url / sitemap are at least
-      # truthful about the host.
+      # truthful about the host they are served from.
       - name: Staging overrides
         run: |
-          printf 'baseurl: /rail-preview\nnoindex_all: true\n' > lab-staging.yml
-          printf 'baseurl: /rail-preview/dspira-lessons\nnoindex_all: true\n' > lessons-staging.yml
+          {
+            echo "baseurl: /rail-preview"
+            echo "noindex_all: true"
+          } > lab-staging.yml
+          {
+            echo "baseurl: /rail-preview/dspira-lessons"
+            echo "noindex_all: true"
+            echo "lab_url: /rail-preview"
+          } > lessons-staging.yml
 
       - name: Build the lab site
         working-directory: lab
@@ -95,26 +103,26 @@ jobs:
           BUNDLE_GEMFILE: ${{ github.workspace }}/Gemfile.ci
           JEKYLL_ENV: production
 
-      # The lab site links to the lessons site root-absolutely (/dspira-lessons/…)
-      # because in production they share a host root. Under the preview they
-      # share /rail-preview/, so rewrite those links in the lab build only, so
-      # a reviewer clicking through stays inside the preview. The lessons site's
-      # links back to the lab ("/", /education/, /accessibility/) get the same
-      # treatment. Nothing else is touched.
+      # The lab site links to the lessons site root-absolutely
+      # (/dspira-lessons/...) because in production the two share a host root.
+      # Under the preview they share /rail-preview/ instead, so those links are
+      # rewritten in the lab build. The lessons site needs no rewrite: its links
+      # back to the lab go through its lab_url setting, which the override above
+      # points at the preview.
       - name: Keep cross-site links inside the preview
         run: |
-          find _site -maxdepth 3 -name '*.html' -not -path '_site/dspira-lessons/*' -print0 \
-            | xargs -0 sed -i 's#href="/dspira-lessons/#href="/rail-preview/dspira-lessons/#g; s#url=/dspira-lessons/#url=/rail-preview/dspira-lessons/#g'
-          find _site/dspira-lessons -name '*.html' -print0 \
-            | xargs -0 sed -i 's#href="/"#href="/rail-preview/"#g; s#href="/education/#href="/rail-preview/education/#g; s#href="/accessibility/#href="/rail-preview/accessibility/#g'
+          find _site -maxdepth 3 -name '*.html' -not -path '_site/dspira-lessons/*' -print0 > /tmp/lab-pages
+          xargs -0 -a /tmp/lab-pages sed -i -e 's|href="/dspira-lessons/|href="/rail-preview/dspira-lessons/|g' -e 's|url=/dspira-lessons/|url=/rail-preview/dspira-lessons/|g'
 
-      - name: Never publish the lab's CNAME from here
+      - name: Sanity-check the preview before publishing it
         run: |
           rm -f _site/CNAME _site/dspira-lessons/CNAME
           test ! -e _site/CNAME
           grep -q 'name="robots" content="noindex"' _site/index.html
           grep -q 'name="robots" content="noindex"' _site/dspira-lessons/index.html
           grep -q 'href="/rail-preview/dspira-lessons/' _site/index.html
+          grep -q 'href="/rail-preview/"' _site/dspira-lessons/index.html
+          ! grep -rq 'giscus' _site/dspira-lessons
 
       - uses: actions/upload-pages-artifact@v3
         with:
