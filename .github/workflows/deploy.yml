@@ -1,24 +1,29 @@
-# A staging copy of the wvurail.github.io "wvu" branch, served at
-#   https://wvurail.org/rail-preview/
-# The custom domain is inherited from the organisation site, so this project
-# repo publishes under a subpath of it automatically. Nothing here is the real
-# site: it exists so the Design System build can be reviewed (Conceptboard,
-# the SCM review) before it replaces main.
+# A staging copy of the lab site's "wvu" branch AND the DSPIRA lessons site's
+# "wvu" branch, served together at
+#   https://wvurail.org/rail-preview/                 (lab site)
+#   https://wvurail.org/rail-preview/dspira-lessons/  (lessons site)
+# — the same shape they will have at rail.wvu.edu. The custom domain is
+# inherited from the organisation site, so this project repo publishes under a
+# subpath of it automatically. Nothing here is the real site: it exists so the
+# Design System builds can be reviewed (Conceptboard, the SCM review) before
+# they replace main in each repo.
 #
 # Every page is built with noindex, and the lab repo's CNAME file is removed
-# from the output before upload â a CNAME in a deployed project site would
+# from the output before upload — a CNAME in a deployed project site would
 # tell GitHub to claim that domain for THIS repo and collide with the
 # organisation site.
 #
-# Teardown, at cutover: delete this repo, or switch Pages off. The branch it
-# reads will have been merged and no longer needs a preview.
+# Pages itself is switched on once, by hand: Settings → Pages → Source:
+# "GitHub Actions". The workflow token is not allowed to do that.
+#
+# Teardown, at cutover: delete this repo, or switch Pages off.
 
-name: Stage the wvu branch
+name: Stage the wvu branches
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # picks up pushes to the lab repo within half an hour
-  workflow_dispatch:         # or immediately, by hand (Actions â Run workflow)
+    - cron: "*/30 * * * *"   # picks up pushes to either repo within half an hour
+  workflow_dispatch:         # or immediately, by hand (Actions → Run workflow)
   push:
     branches: [main]         # edits to this workflow itself
 
@@ -35,13 +40,23 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Lab site (wvurail.github.io @ wvu)
+        uses: actions/checkout@v5
         with:
           repository: WVURAIL/wvurail.github.io
           ref: wvu
+          path: lab
+
+      - name: Lessons site (dspira-lessons @ wvu)
+        uses: actions/checkout@v5
+        with:
+          repository: WVURAIL/dspira-lessons
+          ref: wvu
+          path: lessons
 
       # Same gems GitHub Pages runs (Jekyll 3.9 via the github-pages metagem),
-      # exactly as the lab repo's own build workflow pins them.
+      # exactly as the lab repo's own build workflow pins them. One bundle
+      # serves both builds.
       - name: Pin the exact gems GitHub Pages uses
         run: |
           cat > Gemfile.ci <<'GEMFILE'
@@ -57,30 +72,50 @@ jobs:
         env:
           BUNDLE_GEMFILE: ${{ github.workspace }}/Gemfile.ci
 
-      # Two overrides and nothing else: the subpath, and noindex on every page
-      # (the layout honours site.noindex_all). url stays https://wvurail.org so
-      # canonical / og:url / sitemap are at least truthful about the host.
+      # Two overrides per site and nothing else: the subpath, and noindex on
+      # every page (both layouts honour site.noindex_all). url stays
+      # https://wvurail.org so canonical / og:url / sitemap are at least
+      # truthful about the host.
       - name: Staging overrides
         run: |
-          cat > _config_staging.yml <<'CFG'
-          baseurl: /rail-preview
-          noindex_all: true
-          CFG
+          printf 'baseurl: /rail-preview\nnoindex_all: true\n' > lab-staging.yml
+          printf 'baseurl: /rail-preview/dspira-lessons\nnoindex_all: true\n' > lessons-staging.yml
 
-      - name: Build
-        run: bundle exec jekyll build --trace --config _config.yml,_config_staging.yml
+      - name: Build the lab site
+        working-directory: lab
+        run: bundle exec jekyll build --trace --config _config.yml,../lab-staging.yml -d ../_site
         env:
           BUNDLE_GEMFILE: ${{ github.workspace }}/Gemfile.ci
           JEKYLL_ENV: production
 
+      - name: Build the lessons site into its subpath
+        working-directory: lessons
+        run: bundle exec jekyll build --trace --config _config.yml,../lessons-staging.yml -d ../_site/dspira-lessons
+        env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/Gemfile.ci
+          JEKYLL_ENV: production
+
+      # The lab site links to the lessons site root-absolutely (/dspira-lessons/…)
+      # because in production they share a host root. Under the preview they
+      # share /rail-preview/, so rewrite those links in the lab build only, so
+      # a reviewer clicking through stays inside the preview. The lessons site's
+      # links back to the lab ("/", /education/, /accessibility/) get the same
+      # treatment. Nothing else is touched.
+      - name: Keep cross-site links inside the preview
+        run: |
+          find _site -maxdepth 3 -name '*.html' -not -path '_site/dspira-lessons/*' -print0 \
+            | xargs -0 sed -i 's#href="/dspira-lessons/#href="/rail-preview/dspira-lessons/#g; s#url=/dspira-lessons/#url=/rail-preview/dspira-lessons/#g'
+          find _site/dspira-lessons -name '*.html' -print0 \
+            | xargs -0 sed -i 's#href="/"#href="/rail-preview/"#g; s#href="/education/#href="/rail-preview/education/#g; s#href="/accessibility/#href="/rail-preview/accessibility/#g'
+
       - name: Never publish the lab's CNAME from here
         run: |
-          rm -f _site/CNAME
+          rm -f _site/CNAME _site/dspira-lessons/CNAME
           test ! -e _site/CNAME
           grep -q 'name="robots" content="noindex"' _site/index.html
+          grep -q 'name="robots" content="noindex"' _site/dspira-lessons/index.html
+          grep -q 'href="/rail-preview/dspira-lessons/' _site/index.html
 
-      # Pages itself is switched on once, by hand: Settings → Pages → Source:
-      # "GitHub Actions". The workflow token is not allowed to do that.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
